@@ -1,0 +1,31 @@
+{
+  "profile_name": "Example GrowFood profile",
+  "selection_goal": {
+    "primary": "Build a valid, varied menu across all editable draft days.",
+    "maximize_variety": true
+  },
+  "planning_rules": {
+    "allowed_meal_numbers": [1, 3, 5],
+    "require_reason_per_decision": true,
+    "allow_slot_removal": true
+  },
+  "hard_constraints": [],
+  "soft_preferences": [
+    {
+      "id": "maximize_variety",
+      "priority": "high",
+      "description": "Prefer variety across days when choices are otherwise equivalent."
+    }
+  ],
+  "rotation_preferences": [
+    {
+      "id": "no_same_day_duplicates",
+      "type": "no_duplicate_within_day",
+      "description": "Avoid selecting the same dish twice on one day."
+    }
+  ],
+  "planner_notes": [
+    "Interpret dish names and recipes semantically.",
+    "If every option violates a hard constraint, remove the slot and explain why."
+  ]
+}
