@@ -1,6 +1,6 @@
 # Skills
 
-Reusable OpenClaw skills.
+Reusable skills.
 
 ## Available skills
 
