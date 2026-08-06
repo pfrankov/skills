@@ -116,7 +116,11 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(DECLARATION_KEY, spec["declarationKey"])
         self.assertEqual({"kind": "cron", "expr": "0 12 * * *"}, spec["schedule"])
         self.assertEqual("isolated", spec["sessionTarget"])
-        self.assertIn("NO_REPLY", spec["payload"]["message"])
+        prompt = spec["payload"]["message"]
+        self.assertIn("NO_REPLY", prompt)
+        self.assertIn("👨‍🍳 Меню на <даты> готово и сохранено.", prompt)
+        self.assertIn("GF_AUTOMATION_RESULT", prompt)
+        self.assertIn("Do not include order IDs", prompt)
 
     def test_cron_spec_accepts_timezone(self) -> None:
         spec = build_cron_spec("Europe/Moscow")

@@ -1,6 +1,6 @@
 ---
 name: "growfood-menu"
-description: "Set up GrowFood auth, preferences, and autopilot; select menus, remove extra slots, and verify saves."
+description: "Set up GrowFood menus and autopilot with concise user notifications."
 ---
 
 # GrowFood Menu
@@ -81,11 +81,15 @@ Use only pack IDs offered for that exact date and slot.
 
 ## User messages
 
-On success, send one short message:
+Success notifications must be one short human sentence:
 
-> Меню на <даты> готово. Блюда выбраны по твоим предпочтениям, изменения сохранены.
+> 👨‍🍳 Меню на <даты> готово и сохранено.
 
-If there is no new menu, stay silent. If authentication expires, ask again only for the phone and SMS code. Keep all implementation details out of user-facing messages.
+If exact dates are unavailable, send:
+
+> 👨‍🍳 Новое меню готово и сохранено.
+
+Never expose the order ID, preference-profile status or path, contract/schema names, plan payloads, selection reasons, action counts, raw JSON, or machine-result lines. Do not prefix the message with an automation/process report. If there is no new menu, stay silent. If authentication expires, ask again only for the phone and SMS code. For failures, state only what the user needs to do or know.
 
 ## Validation
 
@@ -95,10 +99,12 @@ PYTHONDONTWRITEBYTECODE=1 python3 {baseDir}/scripts/growfood_self_test.py
 
 For live validation, run auth `status`, `get-planning-context`, and a no-op/skip control path. Never mutate a live menu merely to test installation.
 
-## Result contract
+## Internal result contract
 
-Finish automation turns with:
+When an automation wrapper requires a machine result, emit this line only to the wrapper/parser:
 
 ```text
 GF_AUTOMATION_RESULT: {"status":"success|failed|no_draft","order_id_H":"<id>","saved":true,"accepted":true,"checklist_passed":true,"actions":0}
 ```
+
+The wrapper must parse and remove this line before delivery, then create the user notification from the verified result. Never concatenate agent output, plan text, or the machine result into a user-facing message.
