@@ -12,3 +12,6 @@ During first-time setup, initialize private preferences and install one recurrin
 8. Do not install a second job with another name or declaration key.
 
 Before adding a job on an existing installation, account for an already-operational legacy scheduler. Do not run two GrowFood automations in parallel. Either keep the working legacy scheduler and record setup as satisfied, or migrate it deliberately after verifying the replacement.
+## Draft ID idempotency
+
+The automation wrapper must persist successful draft IDs in `state/growfood_draft_autopilot_state.json` under `processed_orders`. Before invoking the agent or saving a menu, compare the exact `order_id_H` with that map. If the ID is present, stop with a silent no-op. Do not use menu fingerprints or payload changes to reclassify a recorded ID as new. Add the ID only after save, exact verification, and draft acceptance succeed; failed attempts remain eligible for retry.

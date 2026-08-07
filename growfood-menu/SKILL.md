@@ -79,6 +79,14 @@ PYTHONDONTWRITEBYTECODE=1 python3 {baseDir}/scripts/growfood_menu.py save-menu -
 
 Use only pack IDs offered for that exact date and slot.
 
+## Draft deduplication
+
+- Persist successfully processed draft IDs in `state/growfood_draft_autopilot_state.json` under `processed_orders`.
+- Use the exact GrowFood draft ID (`order_id_H`) as the idempotency key.
+- Check this state before invoking the menu workflow. If the draft ID is already present, skip processing and stay silent.
+- A changed menu payload or fingerprint does not make the same draft ID new. Never reprocess or notify for an ID already recorded as processed.
+- Record the draft ID only after save, verification, and draft acceptance all succeed. Failed attempts remain retryable.
+
 ## User messages
 
 Success notifications must be one short human sentence:
