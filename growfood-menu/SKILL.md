@@ -1,6 +1,6 @@
 ---
 name: "growfood-menu"
-description: "Set up GrowFood menus and autopilot with concise user notifications."
+description: "Set up GrowFood menus and autopilot with verified saves, variety limits, recipe bans, and concise notifications."
 ---
 
 # GrowFood Menu
@@ -54,6 +54,7 @@ If valid authentication already exists, skip the phone and SMS steps. Still init
 - Override: `GROWFOOD_PREFERENCE_PROFILE` or `--preferences-file`
 - Neutral template: [examples/preference-profile.json](examples/preference-profile.json)
 - Schema and precedence: [references/preferences.md](references/preferences.md)
+- Optional deterministic safeguards: `planning_rules.variety_limits` entries use `slots` plus `max_occurrences_per_dish`; constraints that must scan ingredients use `match_scope: "name_or_recipe"`.
 
 Persist durable tastes stated in chat to the private profile. Do not put them into the public skill.
 
@@ -65,17 +66,17 @@ Persist durable tastes stated in chat to the private profile. Do not put them in
 PYTHONDONTWRITEBYTECODE=1 python3 {baseDir}/scripts/growfood_menu.py get-planning-context
 ```
 
-2. Evaluate every editable day together using the resolved profile.
-3. Build one `growfood-plan.v1` target. For every affected date, include every currently occupied slot explicitly: keep or replace allowed slots, and set every unwanted occupied slot to `{"packId": null, "reason": "..."}`. `save-menu` rejects incomplete date targets before writing.
+2. Evaluate every editable day together using the resolved profile. Count dish-name occurrences across the complete projected draft before saving. Enforce every explicit `planning_rules.variety_limits` entry across its configured slot group; soft wording such as “maximize variety” never overrides an explicit numeric cap.
+3. Build one `growfood-plan.v1` target containing all editable dates and save it in one `save-menu` call. For every affected date, include every currently occupied slot explicitly: keep or replace allowed slots, and set every unwanted occupied slot to `{"packId": null, "reason": "..."}`. Do not split a whole-draft plan into per-date saves, because doing so hides global rotation defects. `save-menu` rejects incomplete date targets before writing.
 4. Save immediately:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 {baseDir}/scripts/growfood_menu.py save-menu --stdin
 ```
 
-5. Re-fetch and compare every affected slot with the target.
-6. Treat any extra dish, missing removal, unavailable pack, closed-date write, HTTP error, or mismatch as failure. Retry only when safely recoverable.
-7. Accept success only when the saved menu exactly matches the target and the draft is accepted.
+5. Re-fetch and compare every affected slot with the target. Recount all configured variety limits against the saved menu, and inspect both dish names and recipes for constraints whose `match_scope` is `name_or_recipe` or `anywhere`.
+6. Treat any extra dish, missing removal, unavailable pack, closed-date write, HTTP error, mismatch, recipe-scoped ban, or variety-limit violation as failure. Retry only when safely recoverable.
+7. Accept success only when the saved menu exactly matches the target, every post-save constraint passes, and the draft is accepted.
 
 Use only pack IDs offered for that exact date and slot.
 
