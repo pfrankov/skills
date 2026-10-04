@@ -575,26 +575,35 @@ def _load_json_value_from_file_or_stdin(path: Optional[str], use_stdin: bool) ->
     return json.loads(Path(path).read_text())
 
 
+def _positive_int(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValueError(f"{field} must be a positive integer")
+    if isinstance(value, str) and not (value.strip().isascii() and value.strip().isdecimal()):
+        raise ValueError(f"{field} must be a positive integer")
+    number = int(value)
+    if number <= 0:
+        raise ValueError(f"{field} must be a positive integer")
+    return number
+
+
 def _normalize_single_decision(raw: JsonDict) -> JsonDict:
     if not isinstance(raw, dict):
         raise ValueError("decision must be an object")
     meal_date = raw.get("mealDate")
-    meal_number = raw.get("mealNumber")
-    if not meal_date:
+    if not isinstance(meal_date, str) or not meal_date.strip():
         raise ValueError("mealDate is required")
-    if meal_number is None:
-        raise ValueError("mealNumber is required")
-    remove = bool(raw.get("remove"))
-    pack_id = raw.get("packId")
-    if remove:
-        pack_id = None
-    elif pack_id is None and "packId" not in raw:
+    meal_number = _positive_int(raw.get("mealNumber"), "mealNumber")
+    remove = raw.get("remove", False)
+    if not isinstance(remove, bool):
+        raise ValueError("remove must be a boolean")
+    if "packId" not in raw and not remove:
         raise ValueError("packId or remove=true is required")
-    elif pack_id is not None:
-        pack_id = _safe_int(pack_id)
+    pack_id = None if remove else raw.get("packId")
+    if pack_id is not None:
+        pack_id = _positive_int(pack_id, "packId")
     return {
-        "mealDate": str(meal_date),
-        "mealNumber": _safe_int(meal_number),
+        "mealDate": meal_date,
+        "mealNumber": meal_number,
         "packId": pack_id,
         "reason": str(raw.get("reason", "")),
         "newName": (None if raw.get("newName") is None else str(raw.get("newName"))),
@@ -643,54 +652,42 @@ def _normalize_target_menu_payload(data: Any) -> JsonDict:
     order_id = data.get("order_id_H") or data.get("orderId_H") or data.get("orderId")
     decisions: List[JsonDict] = []
 
-    days = data.get("days")
-    if isinstance(days, dict):
+    if "days" in data:
+        days = data["days"]
+        if not isinstance(days, dict):
+            raise ValueError("days must be an object")
         for meal_date, slots in days.items():
             if not isinstance(slots, dict):
-                continue
+                raise ValueError(f"day payload must be an object for {meal_date}")
             for meal_number, slot in slots.items():
                 if not isinstance(slot, dict):
                     raise ValueError(f"slot payload must be an object for {meal_date}/{meal_number}")
-                pack_id = slot.get("packId")
-                remove = bool(slot.get("remove")) or pack_id is None
-                decisions.append(
-                    {
-                        "mealDate": str(meal_date),
-                        "mealNumber": _safe_int(meal_number),
-                        "remove": remove,
-                        "packId": None if remove else _safe_int(pack_id),
-                        "reason": str(slot.get("reason", "Synced from compact target menu payload")),
-                        "newName": slot.get("name"),
-                    }
-                )
+                decisions.append(_normalize_single_decision({
+                    **slot,
+                    "mealDate": meal_date,
+                    "mealNumber": meal_number,
+                    "reason": slot.get("reason", "Synced from compact target menu payload"),
+                    "newName": slot.get("name"),
+                }))
     else:
         dates = data.get("dates")
         if not isinstance(dates, dict):
             raise ValueError("target menu payload must include days or dates object")
         for meal_date, day in dates.items():
             if not isinstance(day, dict):
-                continue
-            meals = day.get("meals") or []
+                raise ValueError(f"day payload must be an object for {meal_date}")
+            meals = day.get("meals")
             if not isinstance(meals, list):
-                continue
+                raise ValueError(f"meals must be an array for {meal_date}")
             for meal in meals:
                 if not isinstance(meal, dict):
-                    continue
-                meal_number = meal.get("mealNumber")
-                if meal_number is None:
-                    raise ValueError(f"mealNumber is required for {meal_date}")
-                pack_id = meal.get("packId")
-                remove = bool(meal.get("remove")) or pack_id is None
-                decisions.append(
-                    {
-                        "mealDate": str(meal_date),
-                        "mealNumber": _safe_int(meal_number),
-                        "remove": remove,
-                        "packId": None if remove else _safe_int(pack_id),
-                        "reason": str(meal.get("reason", "Synced from target menu snapshot")),
-                        "newName": meal.get("name"),
-                    }
-                )
+                    raise ValueError(f"meal payload must be an object for {meal_date}")
+                decisions.append(_normalize_single_decision({
+                    **meal,
+                    "mealDate": meal_date,
+                    "reason": meal.get("reason", "Synced from target menu snapshot"),
+                    "newName": meal.get("name"),
+                }))
 
     return {
         "order_id_H": (None if order_id is None else str(order_id)),
@@ -712,7 +709,9 @@ def build_target_menu_snapshot(decisions: List[JsonDict]) -> JsonDict:
     return snapshot
 
 
-def compare_target_menu_snapshot(compact_menu: JsonDict, target_snapshot: JsonDict) -> List[str]:
+def compare_target_menu_snapshot(
+    compact_menu: JsonDict, target_snapshot: JsonDict, require_complete_dates: bool = False
+) -> List[str]:
     mismatches: List[str] = []
     dates = (compact_menu.get("dates") or {}) if isinstance(compact_menu, dict) else {}
 
@@ -725,6 +724,11 @@ def compare_target_menu_snapshot(compact_menu: JsonDict, target_snapshot: JsonDi
             for meal in day.get("meals") or []:
                 if isinstance(meal, dict):
                     meals[str(_safe_int(meal.get("mealNumber")))] = meal
+
+        if require_complete_dates:
+            for meal_number, meal in meals.items():
+                if meal_number not in slots and meal.get("packId") is not None:
+                    mismatches.append(f"{meal_date} слот {meal_number}: unexpected occupied slot outside target.")
 
         for meal_number, expected_pack_id in sorted(slots.items(), key=lambda item: _safe_int(item[0])):
             meal = meals.get(str(meal_number))

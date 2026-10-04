@@ -272,9 +272,15 @@ class GrowFoodAutoMenuService:
 
         summary["order_id_H"] = order_id_h
         normalized_decisions: List[JsonDict] = []
+        seen_slots = set()
         for idx, raw_decision in enumerate(decisions):
             try:
-                normalized_decisions.append(_normalize_single_decision(raw_decision))
+                decision = _normalize_single_decision(raw_decision)
+                slot = (decision["mealDate"], decision["mealNumber"])
+                if slot in seen_slots:
+                    raise ValueError("duplicate date/meal slot")
+                seen_slots.add(slot)
+                normalized_decisions.append(decision)
             except Exception as exc:
                 summary["issues"].append({"index": idx, "error": f"Invalid decision: {exc}"})
                 break
@@ -317,8 +323,8 @@ class GrowFoodAutoMenuService:
                             }
                         )
 
-                batch_sleep = _safe_float(os.environ.get("GROWFOOD_HTTP_BATCH_SLEEP", "1"))
-                for date_index, (meal_date, date_decisions) in enumerate(sorted(decisions_by_date.items())):
+                changes_by_date: Dict[str, List[JsonDict]] = {}
+                for meal_date, date_decisions in sorted(decisions_by_date.items()):
                     if summary["issues"]:
                         break
                     try:
@@ -381,10 +387,16 @@ class GrowFoodAutoMenuService:
 
                         if summary["issues"]:
                             break
+                        changes_by_date[meal_date] = per_date_changes
+                    except Exception as exc:
+                        summary["issues"].append({"mealDate": meal_date, "error": str(exc)})
+                        break
 
-                        if not per_date_changes:
-                            continue
-
+                batch_sleep = _safe_float(os.environ.get("GROWFOOD_HTTP_BATCH_SLEEP", "1"))
+                for date_index, (meal_date, per_date_changes) in enumerate(changes_by_date.items()):
+                    if summary["issues"]:
+                        break
+                    try:
                         for change_index, item in enumerate(per_date_changes):
                             current_meal = item["meal"]
                             decision = item["decision"]
@@ -461,23 +473,6 @@ class GrowFoodAutoMenuService:
                         )
                         break
 
-        if finalize and summary["applied"]:
-            _progress("Accepting draft")
-            accept_response = self.client.accept_draft(order_id_h)
-            if _is_success_response(accept_response):
-                summary["accepted"] = True
-                _progress("Draft accepted")
-            else:
-                summary["issues"].append({"error": "accept-draft returned success=false"})
-        elif finalize and not summary["issues"] and normalized_decisions:
-            _progress("Accepting draft")
-            accept_response = self.client.accept_draft(order_id_h)
-            if _is_success_response(accept_response):
-                summary["accepted"] = True
-                _progress("Draft accepted")
-            else:
-                summary["issues"].append({"error": "accept-draft returned success=false"})
-
         verification = {
             "checked": False,
             "status": "skipped",
@@ -489,7 +484,25 @@ class GrowFoodAutoMenuService:
             verification = self._verify_saved_state(
                 order_id_h=str(summary.get("order_id_H") or order_id_h or ""),
                 decisions=normalized_decisions,
+                require_complete_dates=require_complete_dates,
             )
+        if finalize and not summary["issues"] and verification.get("status") == "passed":
+            try:
+                _progress("Accepting draft")
+                accept_response = self.client.accept_draft(order_id_h)
+                if _is_success_response(accept_response):
+                    summary["accepted"] = True
+                    _progress("Draft accepted")
+                    verification = self._verify_saved_state(
+                        order_id_h=str(order_id_h),
+                        decisions=normalized_decisions,
+                        require_complete_dates=require_complete_dates,
+                    )
+                else:
+                    summary["issues"].append({"error": "accept-draft returned success=false"})
+            except Exception as exc:
+                summary["issues"].append({"error": f"accept-draft failed: {exc}"})
+
         summary["verification"] = verification
         if verification.get("status") == "error":
             summary["issues"].append(
@@ -519,7 +532,9 @@ class GrowFoodAutoMenuService:
 
         return summary
 
-    def _verify_saved_state(self, order_id_h: str, decisions: List[JsonDict]) -> JsonDict:
+    def _verify_saved_state(
+        self, order_id_h: str, decisions: List[JsonDict], require_complete_dates: bool = False
+    ) -> JsonDict:
         result: JsonDict = {
             "checked": False,
             "status": "skipped",
@@ -534,7 +549,9 @@ class GrowFoodAutoMenuService:
         try:
             full_menu = self.client.get_full_menu(order_id_h=str(order_id_h), customizable=True)
             compact_menu = build_compact_menu(full_menu)
-            mismatches = compare_target_menu_snapshot(compact_menu, result["target"])
+            mismatches = compare_target_menu_snapshot(
+                compact_menu, result["target"], require_complete_dates=require_complete_dates
+            )
             result["checked"] = True
             result["status"] = "mismatch" if mismatches else "passed"
             result["mismatches"] = mismatches
@@ -694,32 +711,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         payload_raw = _load_json_value_from_file_or_stdin(args.menu_file, bool(args.stdin))
         target = _normalize_target_menu_payload(payload_raw)
         if not target["decisions"]:
-            accepted = False
-            issues: List[str] = []
-            if not args.no_finalize:
-                order_id = args.order_id or target.get("order_id_H")
-                if not order_id:
-                    order = service.client.find_new_draft_order()
-                    if order:
-                        order_id = str(order.get("id_H"))
-                if order_id:
-                    try:
-                        response = service.client.accept_draft(str(order_id))
-                        accepted = _is_success_response(response)
-                        if not accepted:
-                            issues.append("accept-draft returned success=false")
-                    except Exception as exc:  # pragma: no cover
-                        issues.append(str(exc))
-                else:
-                    issues.append("no draft order_id available for accept-draft")
             _print_json(
                 {
                     "status": "no_changes",
                     "message": "Target menu has no meals to sync",
                     "applied": [],
                     "skipped": [],
-                    "accepted": accepted,
-                    "issues": issues,
+                    "accepted": False,
+                    "issues": [],
                 }
             )
             return 0

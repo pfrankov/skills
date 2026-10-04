@@ -67,7 +67,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 {baseDir}/scripts/growfood_menu.py get-plannin
 ```
 
 2. Evaluate every editable day together using the resolved profile. Count dish-name occurrences across the complete projected draft before saving. Enforce every explicit `planning_rules.variety_limits` entry across its configured slot group; soft wording such as “maximize variety” never overrides an explicit numeric cap.
-3. Build one `growfood-plan.v1` target containing all editable dates and save it in one `save-menu` call. For every affected date, include every currently occupied slot explicitly: keep or replace allowed slots, and set every unwanted occupied slot to `{"packId": null, "reason": "..."}`. Do not split a whole-draft plan into per-date saves, because doing so hides global rotation defects. `save-menu` rejects incomplete date targets before writing.
+3. Build one `growfood-plan.v1` target containing all editable dates and save it in one `save-menu` call. For every affected date, include every currently occupied slot explicitly: keep or replace allowed slots, and set every unwanted occupied slot to `{"packId": null, "reason": "..."}`. Do not split a whole-draft plan into per-date saves, because doing so hides global rotation defects. `save-menu` rejects malformed or incomplete date targets before writing. A slot must explicitly provide `packId` (a positive integer or decimal string, or `null` to remove) or `remove: true`; omitted IDs are not removals. An empty target is a no-op and does not accept the draft.
 4. Save immediately:
 
 ```bash
@@ -76,7 +76,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 {baseDir}/scripts/growfood_menu.py save-menu -
 
 5. Re-fetch and compare every affected slot with the target. Recount all configured variety limits against the saved menu, and inspect both dish names and recipes for constraints whose `match_scope` is `name_or_recipe` or `anywhere`.
 6. Treat any extra dish, missing removal, unavailable pack, closed-date write, HTTP error, mismatch, recipe-scoped ban, or variety-limit violation as failure. Retry only when safely recoverable.
-7. Accept success only when the saved menu exactly matches the target, every post-save constraint passes, and the draft is accepted.
+7. The helper accepts the draft only after re-fetching and verifying the complete supplied target. A failed save or pre-accept verification leaves the draft unaccepted; earlier successful slot writes may remain and must be re-fetched before retrying. The helper checks the accepted state again afterward and reports any final mismatch or read failure. Accept success only when the saved menu exactly matches the target, every post-save constraint passes, and the draft is accepted.
 
 Use only pack IDs offered for that exact date and slot.
 
